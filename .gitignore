@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+*.zip
+.DS_Store
+config.json
+infra-output.json

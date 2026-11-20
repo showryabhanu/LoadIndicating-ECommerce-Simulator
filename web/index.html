@@ -1,0 +1,1080 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CloudMart Auto-Scaling Dashboard</title>
+  <!-- Chart.js from cdnjs -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <!-- Load dynamic runtime configuration with cache buster -->
+  <script src="config.js?v=2"></script>
+  <style>
+    :root {
+      --bg-base: #0f172a;
+      --bg-card: #1e293b;
+      --bg-card-hover: #273549;
+      --border-color: #334155;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary: #38bdf8;
+      --accent: #6366f1;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-base);
+      color: var(--text-main);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      min-height: 100vh;
+      padding: 24px;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    /* Error Banner */
+    #errorBanner {
+      display: none;
+      background: rgba(239, 68, 68, 0.2);
+      border: 1px solid var(--danger);
+      color: #fca5a5;
+      padding: 14px 20px;
+      border-radius: 10px;
+      align-items: center;
+      justify-content: space-between;
+      animation: fadeIn 0.3s ease;
+    }
+
+    /* Header */
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .header-left h1 {
+      font-size: 1.85rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      background: linear-gradient(135deg, #38bdf8, #818cf8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .header-left .meta {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 6px;
+      font-size: 0.9rem;
+      color: var(--text-muted);
+    }
+
+    .env-badge {
+      background: #1e3a8a;
+      color: #93c5fd;
+      padding: 3px 10px;
+      border-radius: 9999px;
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .live-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      color: #6ee7b7;
+      padding: 6px 14px;
+      border-radius: 9999px;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+
+    .pulse-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background-color: var(--success);
+      box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+      animation: pulse 1.8s infinite;
+    }
+
+    @keyframes pulse {
+      0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+      70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+      100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+    }
+
+    /* KPI Cards */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 16px;
+    }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);
+    }
+
+    .kpi-card .label {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 8px;
+    }
+
+    .kpi-card .value {
+      font-size: 2rem;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+
+    .kpi-card .subtext {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-top: 6px;
+    }
+
+    /* Main Row: Gauge & Load Controller */
+    .dashboard-row {
+      display: grid;
+      grid-template-columns: 1fr 1.3fr;
+      gap: 20px;
+    }
+
+    @media (max-width: 960px) {
+      .dashboard-row {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Gauge */
+    .gauge-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+
+    .gauge-wrapper {
+      position: relative;
+      width: 280px;
+      height: 150px;
+      margin-top: 10px;
+    }
+
+    .gauge-svg {
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+    }
+
+    .gauge-needle {
+      transform-origin: 140px 135px;
+      transition: transform 0.8s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    .gauge-center-text {
+      text-align: center;
+      margin-top: 15px;
+    }
+
+    .gauge-val {
+      font-size: 2.2rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+
+    .gauge-badge {
+      display: inline-block;
+      margin-top: 6px;
+      padding: 4px 12px;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .load-low { background: rgba(16, 185, 129, 0.2); color: #34d399; }
+    .load-medium { background: rgba(245, 158, 11, 0.2); color: #fbbf24; }
+    .load-high { background: rgba(239, 68, 68, 0.2); color: #f87171; }
+
+    /* Control Panel */
+    .control-card h2 {
+      font-size: 1.15rem;
+      font-weight: 600;
+      margin-bottom: 16px;
+      color: var(--text-main);
+    }
+
+    .control-group {
+      margin-bottom: 18px;
+    }
+
+    .control-group label {
+      display: block;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+      font-weight: 500;
+    }
+
+    .select-input, .range-input {
+      width: 100%;
+      background: #0f172a;
+      border: 1px solid var(--border-color);
+      color: var(--text-main);
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 0.95rem;
+    }
+
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .slider-row input[type="range"] {
+      flex: 1;
+      accent-color: var(--primary);
+    }
+
+    .slider-val {
+      min-width: 60px;
+      font-weight: 600;
+      color: var(--primary);
+    }
+
+    .btn-row {
+      display: flex;
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    .btn {
+      flex: 1;
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #0284c7, #2563eb);
+      color: white;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background: linear-gradient(135deg, #0369a1, #1d4ed8);
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+    }
+
+    .btn-danger {
+      background: #ef4444;
+      color: white;
+    }
+
+    .btn-danger:hover:not(:disabled) {
+      background: #dc2626;
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* Running Test Banner */
+    .running-banner {
+      display: none;
+      margin-top: 18px;
+      background: #1e1b4b;
+      border: 1px solid #4338ca;
+      padding: 14px;
+      border-radius: 8px;
+    }
+
+    .running-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .running-badge {
+      font-size: 0.75rem;
+      font-weight: 700;
+      background: #4f46e5;
+      color: white;
+      padding: 3px 8px;
+      border-radius: 4px;
+      letter-spacing: 0.05em;
+    }
+
+    .progress-bar-bg {
+      width: 100%;
+      height: 8px;
+      background: #312e81;
+      border-radius: 9999px;
+      overflow: hidden;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #38bdf8, #818cf8);
+      transition: width 1s linear;
+    }
+
+    /* Charts Grid */
+    .charts-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+      gap: 20px;
+    }
+
+    .chart-card {
+      min-height: 280px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .chart-card h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 14px;
+      color: var(--text-main);
+    }
+
+    .chart-container {
+      position: relative;
+      flex: 1;
+      width: 100%;
+      height: 220px;
+    }
+
+    .chart-placeholder {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      font-style: italic;
+    }
+
+    /* Instance Tiles */
+    .instances-section h2, .timeline-section h2 {
+      font-size: 1.15rem;
+      font-weight: 600;
+      margin-bottom: 16px;
+    }
+
+    .instance-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 16px;
+    }
+
+    .instance-tile {
+      background: #0f172a;
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      padding: 16px;
+      position: relative;
+    }
+
+    .inst-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+
+    .inst-id {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-weight: 600;
+      font-size: 0.95rem;
+      color: var(--primary);
+    }
+
+    .inst-badge {
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 6px;
+      text-transform: uppercase;
+    }
+
+    .state-inservice {
+      background: rgba(16, 185, 129, 0.2);
+      color: #34d399;
+      box-shadow: 0 0 8px rgba(16, 185, 129, 0.3);
+    }
+
+    .state-pending {
+      background: rgba(245, 158, 11, 0.2);
+      color: #fbbf24;
+      animation: pulseAmber 1.5s infinite;
+    }
+
+    .state-terminating {
+      background: rgba(239, 68, 68, 0.2);
+      color: #f87171;
+      animation: pulseRed 1.5s infinite;
+    }
+
+    @keyframes pulseAmber {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    @keyframes pulseRed {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    .inst-detail {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    /* Scaling Timeline */
+    .timeline-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      max-height: 380px;
+      overflow-y: auto;
+      padding-right: 8px;
+    }
+
+    .timeline-item {
+      background: #0f172a;
+      border-left: 3px solid var(--primary);
+      border-radius: 0 8px 8px 0;
+      padding: 12px 16px;
+    }
+
+    .timeline-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+      font-size: 0.85rem;
+    }
+
+    .timeline-time {
+      color: var(--text-muted);
+    }
+
+    .timeline-status {
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      background: rgba(56, 189, 248, 0.15);
+      color: #38bdf8;
+    }
+
+    .timeline-what {
+      font-size: 0.9rem;
+      font-weight: 500;
+      margin-bottom: 4px;
+    }
+
+    .timeline-cause {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <!-- Error Banner -->
+    <div id="errorBanner">
+      <span id="errorMessage">API Connection Error. Auto-retrying in 5s...</span>
+      <button class="btn btn-danger" style="flex:none; padding:4px 10px; font-size:0.8rem;" onclick="fetchDashboardMetrics()">Retry Now</button>
+    </div>
+
+    <!-- Header -->
+    <header>
+      <div class="header-left">
+        <h1>CloudMart Auto-Scaling Dashboard</h1>
+        <div class="meta">
+          <span class="env-badge" id="envBadge">AWS Learner Lab</span>
+          <span>Target: <a id="targetUrl" href="#" target="_blank" style="color:var(--primary); text-decoration:none;">Connecting...</a></span>
+        </div>
+      </div>
+      <div class="header-right">
+        <div class="live-status">
+          <div class="pulse-dot"></div>
+          <span>LIVE</span>
+        </div>
+        <span id="lastUpdated" style="font-size:0.85rem; color:var(--text-muted);">Updated: Just now</span>
+      </div>
+    </header>
+
+    <!-- KPI Cards -->
+    <div class="kpi-grid">
+      <div class="card kpi-card">
+        <div class="label">Current CPU Load</div>
+        <div class="value" id="kpiCpu">0.0%</div>
+        <div class="subtext">Threshold: 50% scale-out</div>
+      </div>
+      <div class="card kpi-card">
+        <div class="label">Requests / Min</div>
+        <div class="value" id="kpiReq">0</div>
+        <div class="subtext">Through Application Load Balancer</div>
+      </div>
+      <div class="card kpi-card">
+        <div class="label">Avg Response Time</div>
+        <div class="value" id="kpiRt">0 ms</div>
+        <div class="subtext">Target backend latency</div>
+      </div>
+      <div class="card kpi-card">
+        <div class="label">InService Instances</div>
+        <div class="value" id="kpiInstances">0 / 0</div>
+        <div class="subtext" id="kpiInstancesSub">Desired: 0 | Min: 0 | Max: 0</div>
+      </div>
+    </div>
+
+    <!-- Main Grid: CPU Semicircle Gauge & Load Control Panel -->
+    <div class="dashboard-row">
+      <!-- Gauge Card -->
+      <div class="card gauge-card">
+        <h2 style="font-size:1.1rem; font-weight:600; margin-bottom:10px;">Live EC2 Cluster CPU Utilization</h2>
+        <div class="gauge-wrapper">
+          <svg class="gauge-svg" viewBox="0 0 280 150">
+            <!-- Background Arc: Green (0-40%), Amber (40-70%), Red (70-100%) -->
+            <path d="M 20 135 A 120 120 0 0 1 260 135" fill="none" stroke="#1e293b" stroke-width="20" stroke-linecap="round"/>
+            <!-- Low Load: Green (0 - 40%) -> 0 to 72 deg -->
+            <path d="M 20 135 A 120 120 0 0 1 73.5 37.8" fill="none" stroke="#10b981" stroke-width="18" stroke-linecap="round"/>
+            <!-- Medium Load: Amber (40 - 70%) -> 72 to 126 deg -->
+            <path d="M 73.5 37.8 A 120 120 0 0 1 206.5 37.8" fill="none" stroke="#f59e0b" stroke-width="18"/>
+            <!-- High Load: Red (70 - 100%) -> 126 to 180 deg -->
+            <path d="M 206.5 37.8 A 120 120 0 0 1 260 135" fill="none" stroke="#ef4444" stroke-width="18" stroke-linecap="round"/>
+            
+            <!-- Needle -->
+            <g id="needleGroup" class="gauge-needle" style="transform: rotate(-90deg);">
+              <polygon points="137,135 143,135 140,25" fill="#f8fafc"/>
+              <circle cx="140" cy="135" r="9" fill="#f8fafc"/>
+              <circle cx="140" cy="135" r="4" fill="#0f172a"/>
+            </g>
+          </svg>
+        </div>
+        <div class="gauge-center-text">
+          <div class="gauge-val" id="gaugeVal">0.0%</div>
+          <div class="gauge-badge load-low" id="gaugeBadge">LOW LOAD</div>
+        </div>
+      </div>
+
+      <!-- Load Test Control Panel -->
+      <div class="card control-card">
+        <h2>Synthetic Load Generator Control</h2>
+        <div class="control-group">
+          <label for="durationSelect">Test Duration</label>
+          <select id="durationSelect" class="select-input">
+            <option value="60">1 Minute (Quick Test)</option>
+            <option value="120">2 Minutes</option>
+            <option value="240" selected>4 Minutes (Recommended for Scaling)</option>
+            <option value="360">6 Minutes (Scale-Out & Cooldown)</option>
+          </select>
+        </div>
+
+        <div class="control-group">
+          <label>Concurrent Worker Threads: <span class="slider-val" id="threadVal">30</span></label>
+          <div class="slider-row">
+            <input type="range" id="threadSlider" min="10" max="60" value="30" step="5" oninput="document.getElementById('threadVal').innerText = this.value">
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <button id="btnStart" class="btn btn-primary" onclick="startLoadTest()">Generate Load</button>
+          <button id="btnStop" class="btn btn-danger" onclick="stopLoadTest()" disabled>Stop</button>
+        </div>
+
+        <!-- Running Banner with Countdown Progress Bar -->
+        <div id="runningBanner" class="running-banner">
+          <div class="running-header">
+            <span class="running-badge">LOAD TEST RUNNING</span>
+            <span id="countdownText" style="font-size:0.85rem; color:#c7d2fe;">Remaining: --s</span>
+          </div>
+          <div class="progress-bar-bg">
+            <div id="progressBarFill" class="progress-bar-fill"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Line Charts (Last 30 Minutes) -->
+    <div class="charts-grid">
+      <!-- CPU Chart with 50% Threshold -->
+      <div class="card chart-card">
+        <h3>Cluster CPU Utilization (%)</h3>
+        <div class="chart-container">
+          <canvas id="cpuChart"></canvas>
+          <div id="cpuPlaceholder" class="chart-placeholder" style="display:none;">Waiting for CloudWatch CPU data...</div>
+        </div>
+      </div>
+
+      <!-- Requests / Min Chart -->
+      <div class="card chart-card">
+        <h3>ALB Requests / Minute</h3>
+        <div class="chart-container">
+          <canvas id="reqChart"></canvas>
+          <div id="reqPlaceholder" class="chart-placeholder" style="display:none;">Waiting for ALB request data...</div>
+        </div>
+      </div>
+
+      <!-- Healthy Host Count Stepped Line Chart -->
+      <div class="card chart-card">
+        <h3>Healthy Target Host Count</h3>
+        <div class="chart-container">
+          <canvas id="hostChart"></canvas>
+          <div id="hostPlaceholder" class="chart-placeholder" style="display:none;">Waiting for healthy host data...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- EC2 Instances Section -->
+    <div class="instances-section card">
+      <h2>Active Auto Scaling Instances</h2>
+      <div class="instance-grid" id="instanceGrid">
+        <div style="color:var(--text-muted); font-size:0.9rem;">Querying ASG instances...</div>
+      </div>
+    </div>
+
+    <!-- Scaling Timeline Section -->
+    <div class="timeline-section card">
+      <h2>Auto Scaling Activities Timeline</h2>
+      <div class="timeline-list" id="timelineList">
+        <div style="color:var(--text-muted); font-size:0.9rem;">No scaling activities recorded yet.</div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    // Configuration & State with direct fallback to active API Gateway endpoint
+    const API_BASE = window.API_URL || "https://xdcqnoje72.execute-api.us-east-1.amazonaws.com";
+    let pollInterval = null;
+    let cpuChart = null;
+    let reqChart = null;
+    let hostChart = null;
+
+    // Initialize Chart.js with dark theme options
+    function initCharts() {
+      const commonOptions = {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { labels: { color: '#94a3b8', boxWidth: 12 } }
+        },
+        scales: {
+          x: {
+            grid: { color: 'rgba(51, 65, 85, 0.4)' },
+            ticks: { color: '#94a3b8', maxTicksLimit: 6 }
+          },
+          y: {
+            grid: { color: 'rgba(51, 65, 85, 0.4)' },
+            ticks: { color: '#94a3b8' }
+          }
+        }
+      };
+
+      // 1. CPU Chart
+      const cpuCtx = document.getElementById('cpuChart').getContext('2d');
+      cpuChart = new Chart(cpuCtx, {
+        type: 'line',
+        data: {
+          labels: [],
+          datasets: [
+            {
+              label: 'Avg CPU %',
+              data: [],
+              borderColor: '#38bdf8',
+              backgroundColor: 'rgba(56, 189, 248, 0.1)',
+              fill: true,
+              tension: 0.3,
+              pointRadius: 2
+            },
+            {
+              label: 'Scale-Out Threshold (50%)',
+              data: [],
+              borderColor: '#ef4444',
+              borderDash: [6, 6],
+              borderWidth: 2,
+              pointRadius: 0,
+              fill: false
+            }
+          ]
+        },
+        options: {
+          ...commonOptions,
+          scales: {
+            ...commonOptions.scales,
+            y: { ...commonOptions.scales.y, min: 0, max: 100 }
+          }
+        }
+      });
+
+      // 2. Request Count Chart
+      const reqCtx = document.getElementById('reqChart').getContext('2d');
+      reqChart = new Chart(reqCtx, {
+        type: 'line',
+        data: {
+          labels: [],
+          datasets: [{
+            label: 'Requests',
+            data: [],
+            borderColor: '#818cf8',
+            backgroundColor: 'rgba(129, 140, 248, 0.1)',
+            fill: true,
+            tension: 0.3,
+            pointRadius: 2
+          }]
+        },
+        options: commonOptions
+      });
+
+      // 3. Healthy Host Count Stepped Line Chart
+      const hostCtx = document.getElementById('hostChart').getContext('2d');
+      hostChart = new Chart(hostCtx, {
+        type: 'line',
+        data: {
+          labels: [],
+          datasets: [{
+            label: 'Healthy Instances',
+            data: [],
+            borderColor: '#10b981',
+            backgroundColor: 'rgba(16, 185, 129, 0.1)',
+            fill: true,
+            stepped: 'before',
+            pointRadius: 3
+          }]
+        },
+        options: {
+          ...commonOptions,
+          scales: {
+            ...commonOptions.scales,
+            y: { ...commonOptions.scales.y, min: 0, suggestedMax: 4, ticks: { stepSize: 1, color: '#94a3b8' } }
+          }
+        }
+      });
+    }
+
+    // Update Semicircle Gauge Needle and Badge
+    function updateGauge(cpuVal) {
+      const clamped = Math.max(0, Math.min(100, cpuVal));
+      // Map 0 - 100% to -90deg to +90deg
+      const angle = -90 + (clamped / 100) * 180;
+      document.getElementById('needleGroup').style.transform = `rotate(${angle}deg)`;
+      document.getElementById('gaugeVal').innerText = `${clamped.toFixed(1)}%`;
+
+      const badge = document.getElementById('gaugeBadge');
+      if (clamped < 40) {
+        badge.className = 'gauge-badge load-low';
+        badge.innerText = 'LOW LOAD';
+      } else if (clamped <= 70) {
+        badge.className = 'gauge-badge load-medium';
+        badge.innerText = 'MEDIUM LOAD';
+      } else {
+        badge.className = 'gauge-badge load-high';
+        badge.innerText = 'HIGH LOAD';
+      }
+    }
+
+    // Format ISO timestamps to HH:MM:SS
+    function formatTime(isoStr) {
+      if (!isoStr) return '';
+      const d = new Date(isoStr);
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+
+    // Main fetch loop
+    async function fetchDashboardMetrics() {
+      if (!API_BASE) {
+        showError("API_URL not configured in config.js");
+        return;
+      }
+
+      try {
+        const resp = await fetch(`${API_BASE}/metrics`, { cache: 'no-store' });
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+        }
+        const data = await resp.json();
+        hideError();
+        renderDashboard(data);
+      } catch (err) {
+        showError(`Metrics fetch failed: ${err.message}`);
+      }
+    }
+
+    function showError(msg) {
+      const banner = document.getElementById('errorBanner');
+      document.getElementById('errorMessage').innerText = msg;
+      banner.style.display = 'flex';
+    }
+
+    function hideError() {
+      document.getElementById('errorBanner').style.display = 'none';
+    }
+
+    // Render all dashboard sections
+    function renderDashboard(data) {
+      // 1. Header meta
+      if (data.env) document.getElementById('envBadge').innerText = data.env;
+      if (data.target) {
+        const tLink = document.getElementById('targetUrl');
+        tLink.href = data.target;
+        tLink.innerText = data.target;
+      }
+      document.getElementById('lastUpdated').innerText = `Updated: ${new Date().toLocaleTimeString()}`;
+
+      // 2. Series Data for Charts & Latest Values
+      const series = data.series || {};
+      const cpuData = series.cpu || [];
+      const reqData = series.req || [];
+      const rtData = series.rt || [];
+      const hostData = series.healthy || [];
+
+      // Calculate latest KPI values
+      const latestCpu = cpuData.length ? cpuData[cpuData.length - 1].v : 0.0;
+      const latestReq = reqData.length ? reqData[reqData.length - 1].v : 0;
+      // TargetResponseTime from CloudWatch is in seconds; convert to ms
+      let latestRtMs = 0;
+      if (rtData.length) {
+        const rawSec = rtData[rtData.length - 1].v;
+        latestRtMs = Math.round(rawSec * 1000);
+      }
+
+      // ASG info
+      const asg = data.asg || {};
+      const instances = asg.instances || [];
+      const inServiceCount = instances.filter(i => i.state === 'InService').length;
+      const maxCount = asg.max || 4;
+
+      // Update KPIs
+      document.getElementById('kpiCpu').innerText = `${latestCpu.toFixed(1)}%`;
+      document.getElementById('kpiReq').innerText = `${latestReq} req/min`;
+      document.getElementById('kpiRt').innerText = `${latestRtMs} ms`;
+      document.getElementById('kpiInstances').innerText = `${inServiceCount} / ${maxCount}`;
+      document.getElementById('kpiInstancesSub').innerText = `Desired: ${asg.desired || 1} | Min: ${asg.min || 1} | Max: ${maxCount}`;
+
+      // Update Gauge
+      updateGauge(latestCpu);
+
+      // Update CPU Chart
+      if (cpuData.length) {
+        document.getElementById('cpuPlaceholder').style.display = 'none';
+        document.getElementById('cpuChart').style.display = 'block';
+        cpuChart.data.labels = cpuData.map(d => formatTime(d.t));
+        cpuChart.data.datasets[0].data = cpuData.map(d => d.v);
+        cpuChart.data.datasets[1].data = cpuData.map(() => 50); // Threshold 50%
+        cpuChart.update();
+      } else {
+        document.getElementById('cpuPlaceholder').style.display = 'flex';
+        document.getElementById('cpuChart').style.display = 'none';
+      }
+
+      // Update Request Chart
+      if (reqData.length) {
+        document.getElementById('reqPlaceholder').style.display = 'none';
+        document.getElementById('reqChart').style.display = 'block';
+        reqChart.data.labels = reqData.map(d => formatTime(d.t));
+        reqChart.data.datasets[0].data = reqData.map(d => d.v);
+        reqChart.update();
+      } else {
+        document.getElementById('reqPlaceholder').style.display = 'flex';
+        document.getElementById('reqChart').style.display = 'none';
+      }
+
+      // Update Host Count Chart
+      if (hostData.length) {
+        document.getElementById('hostPlaceholder').style.display = 'none';
+        document.getElementById('hostChart').style.display = 'block';
+        hostChart.data.labels = hostData.map(d => formatTime(d.t));
+        hostChart.data.datasets[0].data = hostData.map(d => d.v);
+        hostChart.update();
+      } else {
+        document.getElementById('hostPlaceholder').style.display = 'flex';
+        document.getElementById('hostChart').style.display = 'none';
+      }
+
+      // Render Instances Grid
+      renderInstances(instances);
+
+      // Render Scaling Activities Timeline
+      renderTimeline(asg.activities || []);
+
+      // Render Load Generator State
+      renderLoadState(data.load || {});
+    }
+
+    function renderInstances(instances) {
+      const grid = document.getElementById('instanceGrid');
+      if (!instances || instances.length === 0) {
+        grid.innerHTML = '<div style="color:var(--text-muted); font-size:0.9rem;">No instances running.</div>';
+        return;
+      }
+
+      grid.innerHTML = instances.map(inst => {
+        const state = inst.state || 'Unknown';
+        let stateClass = 'state-inservice';
+        if (state.toLowerCase().includes('pending')) {
+          stateClass = 'state-pending';
+        } else if (state.toLowerCase().includes('terminat')) {
+          stateClass = 'state-terminating';
+        }
+
+        return `
+          <div class="instance-tile">
+            <div class="inst-top">
+              <span class="inst-id">${inst.id}</span>
+              <span class="inst-badge ${stateClass}">${state}</span>
+            </div>
+            <div class="inst-detail"><strong>AZ:</strong> ${inst.az || 'us-east-1'}</div>
+            <div class="inst-detail"><strong>Health:</strong> ${inst.health || 'Healthy'}</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderTimeline(activities) {
+      const list = document.getElementById('timelineList');
+      if (!activities || activities.length === 0) {
+        list.innerHTML = '<div style="color:var(--text-muted); font-size:0.9rem;">No scaling activities recorded yet.</div>';
+        return;
+      }
+
+      list.innerHTML = activities.map(act => {
+        return `
+          <div class="timeline-item">
+            <div class="timeline-header">
+              <span class="timeline-time">${act.time ? new Date(act.time).toLocaleString() : ''}</span>
+              <span class="timeline-status">${act.status || 'Active'}</span>
+            </div>
+            <div class="timeline-what">${act.what || 'Scaling event'}</div>
+            <div class="timeline-cause">${act.cause || ''}</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderLoadState(load) {
+      const btnStart = document.getElementById('btnStart');
+      const btnStop = document.getElementById('btnStop');
+      const banner = document.getElementById('runningBanner');
+      const progressBar = document.getElementById('progressBarFill');
+      const countdownText = document.getElementById('countdownText');
+
+      if (load.running) {
+        btnStart.disabled = true;
+        btnStop.disabled = false;
+        banner.style.display = 'block';
+
+        const now = Math.floor(Date.now() / 1000);
+        const elapsed = now - (load.started || now);
+        const total = load.duration || 240;
+        const remaining = Math.max(0, total - elapsed);
+        const pct = Math.min(100, Math.max(0, (elapsed / total) * 100));
+
+        progressBar.style.width = `${pct}%`;
+        countdownText.innerText = `Remaining: ${remaining}s (${load.threads || 30} threads)`;
+      } else {
+        btnStart.disabled = false;
+        btnStop.disabled = true;
+        banner.style.display = 'none';
+        progressBar.style.width = '0%';
+      }
+    }
+
+    // Trigger Load Test
+    async function startLoadTest() {
+      const duration = parseInt(document.getElementById('durationSelect').value, 10);
+      const threads = parseInt(document.getElementById('threadSlider').value, 10);
+      document.getElementById('btnStart').disabled = true;
+
+      try {
+        const resp = await fetch(`${API_BASE}/load/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ duration, threads })
+        });
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status}`);
+        }
+        setTimeout(fetchDashboardMetrics, 500);
+      } catch (err) {
+        showError(`Failed to start load test: ${err.message}`);
+        document.getElementById('btnStart').disabled = false;
+      }
+    }
+
+    // Stop Load Test
+    async function stopLoadTest() {
+      document.getElementById('btnStop').disabled = true;
+      try {
+        const resp = await fetch(`${API_BASE}/load/stop`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        });
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status}`);
+        }
+        setTimeout(fetchDashboardMetrics, 500);
+      } catch (err) {
+        showError(`Failed to stop load test: ${err.message}`);
+      }
+    }
+
+    // Initialize application on page load
+    window.addEventListener('DOMContentLoaded', () => {
+      initCharts();
+      fetchDashboardMetrics();
+      // Poll every 5 seconds
+      pollInterval = setInterval(fetchDashboardMetrics, 5000);
+    });
+  </script>
+</body>
+</html>
